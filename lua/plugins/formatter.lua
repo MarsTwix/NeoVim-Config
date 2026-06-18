@@ -10,7 +10,6 @@ return {
 			css = { "prettierd" },
 			scss = { "prettierd" },
 			json = { "prettierd" },
-			cs = { "csharpier" },
 			python = { "black" },
 		},
 		format_on_save = {

@@ -25,6 +25,20 @@ return {
 				},
 			})
 
+			local dotnet8_paths = vim.fn.glob(vim.fn.expand("~/.asdf/installs/dotnet/8.*"), false, true)
+			table.sort(dotnet8_paths)
+			local dotnet8_path = dotnet8_paths[#dotnet8_paths]
+
+			if dotnet8_path and vim.fn.isdirectory(dotnet8_path) == 1 then
+				vim.lsp.config("csharp_ls", {
+					cmd_env = {
+						DOTNET_ROOT = dotnet8_path,
+						DOTNET_ROOT_X64 = dotnet8_path,
+						PATH = dotnet8_path .. ":" .. vim.env.PATH,
+					},
+				})
+			end
+
 			require("mason-lspconfig").setup(opts)
 		end,
 	},
@@ -54,8 +68,7 @@ return {
 				"prettierd",
 				"eslint_d",
 				-- C#
-				"omnisharp",
-				"csharpier",
+				"csharp-language-server",
 				-- Python
 				"pyright",
 				"black",
