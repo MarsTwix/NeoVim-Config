@@ -29,6 +29,7 @@ vim.o.cursorline = true
 
 vim.opt.spell = true
 vim.opt.spelllang = "en,nl"
+
 -- theme
 
 vim.api.nvim_set_hl(0, "SpellBad", { undercurl = true, sp = "#89CFF0" })

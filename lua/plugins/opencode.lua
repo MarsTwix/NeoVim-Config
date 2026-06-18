@@ -10,8 +10,18 @@ return {
 				input = {}, -- Enhances `ask()`
 				picker = { -- Enhances `select()`
 					actions = {
-						opencode_send = function(...)
-							return require("opencode").snacks_picker_send(...)
+						opencode_send = function(picker)
+							local items = vim.tbl_map(function(item)
+								return item.file
+										and require("opencode").format({
+											path = item.file,
+											from = item.pos,
+											to = item.end_pos,
+										})
+									or item.text
+							end, picker:selected({ fallback = true }))
+
+							require("opencode").prompt(table.concat(items, ", ") .. " ")
 						end,
 					},
 					win = {
@@ -32,6 +42,8 @@ return {
 		local opencode_context = require("opencode.context")
 		local opencode_prompt = require("opencode.api.prompt").prompt
 		local opencode_ui_ask = require("opencode.ui.ask").ask
+		local opencode_discovery = require("opencode.server.discovery")
+		local opencode_select_session = require("opencode.ui.select_session").select_session
 		local map = vim.keymap.set
 
 		local function notify_opencode_error(err)
@@ -54,17 +66,17 @@ return {
 			direction = "vertical",
 			hidden = true,
 			close_on_exit = false,
-				on_open = function(term)
-					pcall(vim.keymap.del, "t", "<C-\\>", { buffer = term.bufnr })
-					map("t", "<C-]>", [[<C-\><C-n>]], { buffer = term.bufnr, desc = "Exit terminal mode" })
-					vim.schedule(function()
-						if term.window and vim.api.nvim_win_is_valid(term.window) then
-							vim.wo[term.window].spell = false
-							term:focus()
-							vim.cmd.startinsert()
-						end
-					end)
-				end,
+			on_open = function(term)
+				pcall(vim.keymap.del, "t", "<C-\\>", { buffer = term.bufnr })
+				map("t", "<C-]>", [[<C-\><C-n>]], { buffer = term.bufnr, desc = "Exit terminal mode" })
+				vim.schedule(function()
+					if term.window and vim.api.nvim_win_is_valid(term.window) then
+						vim.wo[term.window].spell = false
+						term:focus()
+						vim.cmd.startinsert()
+					end
+				end)
+			end,
 		})
 
 		local function focus_opencode_panel()
@@ -83,15 +95,22 @@ return {
 			end
 		end
 
-		local function ask_current_session()
+		local function toggle_opencode_panel()
+			opencode_term:toggle()
+			if opencode_term:is_open() then
+				vim.schedule(focus_opencode_panel)
+			end
+		end
+
+		local function with_opencode_server(action)
+			return opencode_discovery.get():next(action):catch(notify_opencode_error)
+		end
+
+		local function ask_current_session(server)
 			local context = opencode_context.new()
-			return opencode_ui_ask(ask_prompt(), context)
+			return opencode_ui_ask(ask_prompt(), server, context)
 				:next(function(input)
-					context:clear()
-					return opencode_prompt(input, {
-						context = context,
-						submit = input:sub(-1) ~= " ",
-					})
+					return opencode_prompt(input, server, context)
 				end)
 				:next(function(result)
 					show_opencode_panel()
@@ -99,9 +118,26 @@ return {
 				end)
 		end
 
-		local function run_in_session(action, opts)
-			local request = opts and opts.new_session and opencode_command("session.new"):next(action) or action()
-			return request:catch(notify_opencode_error)
+		local function ask_in_session(opts)
+			return with_opencode_server(function(server)
+				if opts and opts.new_session then
+					return opencode_command("session.new", server):next(function()
+						return ask_current_session(server)
+					end)
+				end
+
+				return ask_current_session(server)
+			end)
+		end
+
+		local function switch_session()
+			return with_opencode_server(function(server)
+				return opencode_select_session(server)
+					:next(function(session)
+						return server:select_session(session.id)
+					end)
+					:next(show_opencode_panel)
+			end)
 		end
 
 		---@type opencode.Opts
@@ -110,39 +146,26 @@ return {
 				start = function()
 					opencode_term:spawn()
 				end,
-				stop = function()
-					opencode_term:shutdown()
-				end,
-				toggle = function()
-					opencode_term:toggle()
-					if opencode_term:is_open() then
-						vim.schedule(focus_opencode_panel)
-					end
-				end,
 			},
 		}
 
 		vim.o.autoread = true -- Required for `opts.events.reload`
 
 		map({ "n", "x" }, "<leader>oa", function()
-			run_in_session(ask_current_session)
+			ask_in_session()
 		end, { desc = "Ask opencode" })
 		map({ "n", "x" }, "<leader>oA", function()
-			run_in_session(ask_current_session, { new_session = true })
+			ask_in_session({ new_session = true })
 		end, { desc = "Ask opencode in new session" })
 		map({ "n", "x" }, "<leader>ox", opencode.select, { desc = "Opencode actions" })
-		map("n", "<leader>oo", opencode.toggle, { desc = "Toggle opencode" })
+		map("n", "<leader>oo", toggle_opencode_panel, { desc = "Toggle opencode" })
 		map("n", "<leader>on", function()
-			opencode_command("session.new")
-				:next(function()
-					show_opencode_panel()
-				end)
-				:catch(notify_opencode_error)
+			with_opencode_server(function(server)
+				return opencode_command("session.new", server):next(show_opencode_panel)
+			end)
 		end, { desc = "New opencode session" })
 		map("n", "<leader>os", function()
-			opencode.select_session():next(function()
-				show_opencode_panel()
-			end)
+			switch_session()
 		end, { desc = "Switch opencode session" })
 
 		map({ "n", "x" }, "go", function()
